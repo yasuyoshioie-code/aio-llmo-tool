@@ -369,10 +369,14 @@ if run_btn and url:
         with st.status("🏗️ Phase 2.6: サイト構造完全性診断", expanded=True) as status26:
             classified = [{"url": pr["url"], "role": pr.get("role", "other"), "structure": pr["structure"]} for pr in page_results]
             completeness = check_site_completeness(classified, preset_id)
-            st.write(f"構造完全性: **{completeness['completeness_score']}%** — "
-                     f"必須ページ: {len(completeness['required_found'])}/{len(completeness['required_found'])+len(completeness['required_missing'])} 検出")
-            if completeness.get("missing_required"):
-                st.warning(f"未検出の必須ページ: {', '.join(completeness['missing_required'])}")
+            comp_score = completeness.get("completeness_score", 0)
+            found_roles = completeness.get("found_roles", {})
+            missing_req = completeness.get("missing_required", [])
+            total_req = len(found_roles) + len(missing_req)
+            st.write(f"構造完全性: **{comp_score}%** — "
+                     f"必須ページ: {len(found_roles)}/{total_req} 検出")
+            if missing_req:
+                st.warning(f"未検出の必須ページ: {', '.join(missing_req)}")
 
             # score_site が利用可能なら呼び出し
             if hasattr(preset, "score_site"):
