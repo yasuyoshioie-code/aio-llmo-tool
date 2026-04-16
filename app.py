@@ -25,6 +25,7 @@ from core.site_crawler import get_site_urls
 from core.site_aggregator import aggregate_site_results
 from core.pptx_generator import generate_pptx_report
 from core.presets import get_preset, PRESETS
+from core.page_classifier import classify_page, classify_pages, check_site_completeness
 
 
 def _save_env_key(key_name: str, key_value: str) -> bool:
@@ -53,6 +54,7 @@ def analyze_single_page(
     pagespeed: dict,
     sitemap: dict,
     preset=None,
+    role: str = "other",
 ) -> dict:
     """1ページのPython解析とスコアリングを実行。プリセットでスコアリング方式を切替。"""
     page_data = fetch_page(page_url, tavily_key)
@@ -65,8 +67,19 @@ def analyze_single_page(
     if not structure.get("content_text") and page_data.get("content"):
         structure["content_text"] = page_data["content"]
 
+    # ロール自動判定（未指定の場合）
+    if role == "other" and preset is not None:
+        role = classify_page(page_url, structure)
+
     if preset is not None:
-        all_scores, categories, total = preset.score_page(structure, robots, llms, pagespeed, sitemap)
+        # ロール対応のプリセットはroleを渡す
+        try:
+            all_scores, categories, total = preset.score_page(
+                structure, robots, llms, pagespeed, sitemap, role=role)
+        except TypeError:
+            # roleパラメータ未対応の古いプリセット（media等）
+            all_scores, categories, total = preset.score_page(
+                structure, robots, llms, pagespeed, sitemap)
     else:
         technical_scores = calculate_technical_scores(structure, robots, llms, pagespeed, sitemap)
         content_citation = analyze_content_python(structure["content_text"], structure)
@@ -94,6 +107,7 @@ def analyze_single_page(
         "categories": categories,
         "total": total,
         "fetch_source": page_data.get("source", ""),
+        "role": role,
     }
 
 
@@ -327,10 +341,12 @@ if run_btn and url:
         for i, p in enumerate(sampled_pages):
             p_url = p["url"]
             try:
-                result = analyze_single_page(p_url, tavily_key, robots, llms, pagespeed, sitemap, preset=preset)
+                p_role = p.get("role", "other")
+                result = analyze_single_page(p_url, tavily_key, robots, llms, pagespeed, sitemap, preset=preset, role=p_role)
                 result["type"] = p.get("type", "page")
                 page_results.append(result)
-                st.write(f"✅ [{i+1}/{len(sampled_pages)}] {p.get('type','page')}: {p_url[:80]} — {result['total']['total']}/100 ({result['total']['grade']})")
+                role_label = result.get("role", "other")
+                st.write(f"✅ [{i+1}/{len(sampled_pages)}] [{role_label}] {p_url[:70]} — {result['total']['total']}/100 ({result['total']['grade']})")
             except Exception as e:
                 st.write(f"⚠️ [{i+1}/{len(sampled_pages)}] 分析失敗: {p_url[:60]} ({str(e)[:40]})")
             prog_bar.progress((i + 1) / len(sampled_pages))
@@ -345,6 +361,27 @@ if run_btn and url:
 
     # ===== Phase 2.5: サイト全体集計 =====
     site_agg = aggregate_site_results(page_results)
+
+    # ===== Phase 2.6: サイト構造診断（コーポレート/採用のみ） =====
+    site_diagnosis = None
+    is_aggregated = is_site_mode or (is_paste_mode and len(page_results) > 1)
+    if is_aggregated and preset_id in ("corporate", "recruiting"):
+        with st.status("🏗️ Phase 2.6: サイト構造完全性診断", expanded=True) as status26:
+            classified = [{"url": pr["url"], "role": pr.get("role", "other"), "structure": pr["structure"]} for pr in page_results]
+            completeness = check_site_completeness(classified, preset_id)
+            st.write(f"構造完全性: **{completeness['completeness_score']}%** — "
+                     f"必須ページ: {len(completeness['required_found'])}/{len(completeness['required_found'])+len(completeness['required_missing'])} 検出")
+            if completeness.get("missing_required"):
+                st.warning(f"未検出の必須ページ: {', '.join(completeness['missing_required'])}")
+
+            # score_site が利用可能なら呼び出し
+            if hasattr(preset, "score_site"):
+                site_diagnosis = preset.score_site(page_results, classified)
+                st.write(f"✅ ロール別スコアリング完了 — {len(site_diagnosis.get('role_scores', {}))}ロール診断")
+            else:
+                site_diagnosis = {"structure_completeness": completeness, "role_scores": {}, "schema_map": {}, "page_recommendations": []}
+
+            status26.update(label="🏗️ Phase 2.6: サイト構造診断完了", state="complete")
 
     # 入力URLのページ結果 or 代表ページ（最高スコア or ホーム）を「代表ページ」として選ぶ
     representative = next(
@@ -895,8 +932,9 @@ if run_btn and url:
                     competitors=competitor_analyses, comparison=comparison,
                     improvements=improvements, test_queries=test_queries,
                     cv_data=cv_data,
-                    site_agg=site_agg if (is_site_mode or (is_paste_mode and len(page_results) > 1)) else None,
+                    site_agg=site_agg if is_aggregated else None,
                     preset_id=preset_id,
+                    site_diagnosis=site_diagnosis,
                 )
                 st.download_button(
                     label="📊 クライアント提出用PPTX", data=pptx_buf,
