@@ -115,8 +115,7 @@ def _check_password() -> bool:
     # secrets / env var から取得
     app_pw = ""
     try:
-        if hasattr(st, "secrets"):
-            app_pw = st.secrets.get("APP_PASSWORD", "") or ""
+        app_pw = st.secrets["APP_PASSWORD"]
     except Exception:
         pass
     if not app_pw:
