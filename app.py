@@ -129,23 +129,24 @@ def _check_password() -> bool:
     if st.session_state.get("_authed"):
         return True
 
-    # ログイン画面
-    st.markdown("<div style='max-width:420px;margin:15vh auto 0;'>", unsafe_allow_html=True)
-    st.markdown("## 🔐 AIO/LLMO 診断ツール")
-    st.caption("このツールは限定公開です。アクセスパスワードを入力してください。")
+    # ログイン画面（中央寄せ）
+    _col1, _col2, _col3 = st.columns([1, 1.5, 1])
+    with _col2:
+        st.markdown("")
+        st.markdown("")
+        st.markdown("## 🔐 AIO/LLMO 診断ツール")
+        st.caption("このツールは限定公開です。アクセスパスワードを入力してください。")
 
-    with st.form("login", clear_on_submit=False):
-        pw = st.text_input("パスワード", type="password")
-        submit = st.form_submit_button("ログイン", type="primary", use_container_width=True)
+        with st.form("login", clear_on_submit=False):
+            pw = st.text_input("パスワード", type="password")
+            submit = st.form_submit_button("ログイン", type="primary", use_container_width=True)
 
-    if submit:
-        if pw == app_pw:
-            st.session_state["_authed"] = True
-            st.rerun()
-        else:
-            st.error("❌ パスワードが違います")
-
-    st.markdown("</div>", unsafe_allow_html=True)
+        if submit:
+            if pw == app_pw:
+                st.session_state["_authed"] = True
+                st.rerun()
+            else:
+                st.error("❌ パスワードが違います")
     return False
 
 
