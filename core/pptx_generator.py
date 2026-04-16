@@ -1895,6 +1895,297 @@ def generate_pptx_report(
         _footer(s, _pg())
 
     # ==============================================================
+    # 📋 カテゴリ別 深掘りスライド（各カテゴリ1枚）
+    # ==============================================================
+    for cat_idx, (cat_key, cat_label) in enumerate(cat_order):
+        cat_data = categories.get(cat_key, {})
+        cat_score = cat_data.get("score", 0)
+        cat_max = cat_data.get("max", 20) or 20
+        cat_items = cat_data.get("items", [])
+
+        # items が空なら all_scores からフォールバック
+        if not cat_items and all_scores:
+            prefix = cat_key.split("_")[0]  # "1", "2", etc.
+            for sk, sv in (all_scores or {}).items():
+                if isinstance(sv, dict) and sk.startswith(prefix + "-"):
+                    cat_items.append({
+                        "key": sk, "label": sv.get("label", sk),
+                        "score": sv.get("score", 0), "max": sv.get("max", 0),
+                        "reason": sv.get("reason", ""),
+                    })
+
+        if not cat_items:
+            continue
+
+        s = pres.slides.add_slide(blank)
+        _set_bg(s, C.cream)
+        _header_bar(s, f"📋 {cat_label} — 項目別スコア詳細",
+                    f"{cat_score:.0f} / {cat_max}")
+
+        # ヘッダー行
+        _add_rect(s, 0.5, 1.1, 12.3, 0.45, C.navy)
+        for htxt, hx, hw in [("項目", 0.7, 3.2), ("スコア", 3.9, 1.0),
+                              ("達成率", 4.9, 3.5), ("判定", 8.4, 0.8),
+                              ("所見", 9.2, 3.5)]:
+            _add_text_box(s, hx, 1.1, hw, 0.45, htxt,
+                          size=11, bold=True, color=C.white,
+                          anchor=MSO_ANCHOR.MIDDLE)
+
+        for i, item in enumerate(cat_items[:10]):
+            y = 1.55 + i * 0.48
+            iscore = item.get("score", 0)
+            imax = item.get("max", 1) or 1
+            pct = iscore / imax
+            bar_color = C.green if pct >= 0.7 else (C.amber if pct >= 0.4 else C.red)
+            grade = "◎" if pct >= 0.8 else ("○" if pct >= 0.6 else ("△" if pct >= 0.4 else "×"))
+
+            bg = C.white if i % 2 == 0 else C.light_bg
+            _add_rect(s, 0.5, y, 12.3, 0.48, bg, line_color=C.border)
+            _add_text_box(s, 0.7, y, 3.2, 0.48,
+                          str(item.get("label", item.get("key", "")))[:28],
+                          size=10, color=C.text_dark, anchor=MSO_ANCHOR.MIDDLE)
+            _add_text_box(s, 3.9, y, 1.0, 0.48, f"{iscore}/{imax}",
+                          size=11, bold=True, color=C.text_dark,
+                          align=PP_ALIGN.CENTER, anchor=MSO_ANCHOR.MIDDLE)
+            # 達成率バー
+            _add_rect(s, 4.9, y + 0.14, 3.5, 0.2, C.border,
+                      shape_type=MSO_SHAPE.ROUNDED_RECTANGLE)
+            _add_rect(s, 4.9, y + 0.14, max(3.5 * pct, 0.05), 0.2, bar_color,
+                      shape_type=MSO_SHAPE.ROUNDED_RECTANGLE)
+            _add_text_box(s, 8.4, y, 0.8, 0.48, grade,
+                          size=14, bold=True, color=bar_color,
+                          align=PP_ALIGN.CENTER, anchor=MSO_ANCHOR.MIDDLE)
+            _add_text_box(s, 9.2, y, 3.5, 0.48,
+                          str(item.get("reason", ""))[:50],
+                          size=9, color=C.muted, anchor=MSO_ANCHOR.MIDDLE)
+
+        _footer(s, _pg())
+
+    # ==============================================================
+    # ⚡ Core Web Vitals 詳細
+    # ==============================================================
+    s = pres.slides.add_slide(blank)
+    _set_bg(s, C.cream)
+    _header_bar(s, "⚡ Core Web Vitals 詳細診断", "Google PageSpeed Insights")
+
+    ps_score = pagespeed.get("score", 0) or 0
+    ps_color = C.green if ps_score >= 80 else (C.amber if ps_score >= 50 else C.red)
+
+    # Performance Score 大型表示
+    _add_rect(s, 0.5, 1.1, 3.5, 3.5, C.navy, shape_type=MSO_SHAPE.ROUNDED_RECTANGLE)
+    _add_text_box(s, 0.5, 1.3, 3.5, 0.4, "Performance Score",
+                  size=13, color=C.cyan, align=PP_ALIGN.CENTER)
+    _add_text_box(s, 0.5, 1.8, 3.5, 1.5, str(ps_score),
+                  size=72, bold=True, color=ps_color, font=FONT_HDR,
+                  align=PP_ALIGN.CENTER, anchor=MSO_ANCHOR.MIDDLE)
+    _add_text_box(s, 0.5, 3.4, 3.5, 0.4, "/ 100",
+                  size=16, color=C.text_light, align=PP_ALIGN.CENTER)
+    _add_text_box(s, 0.5, 4.0, 3.5, 0.5,
+                  f"Source: {pagespeed.get('source', 'N/A')[:30]}",
+                  size=9, italic=True, color=C.muted, align=PP_ALIGN.CENTER)
+
+    # CWV 3メトリクス
+    cwv_metrics = [
+        ("LCP", "Largest Contentful Paint",
+         pagespeed.get("lcp"), "ms", 2500, 4000,
+         "画像/フォントの最適化、サーバー応答時間改善"),
+        ("CLS", "Cumulative Layout Shift",
+         pagespeed.get("cls"), "", 0.1, 0.25,
+         "画像サイズ指定、フォント読込最適化、広告枠固定"),
+        ("INP", "Interaction to Next Paint",
+         pagespeed.get("inp"), "ms", 200, 500,
+         "JavaScript最適化、イベントハンドラの軽量化"),
+    ]
+
+    for i, (short, full, val, unit, good_th, poor_th, fix) in enumerate(cwv_metrics):
+        x = 4.3
+        y = 1.1 + i * 1.7
+
+        if val is not None:
+            if isinstance(val, float) and val < 1:
+                display_val = f"{val:.4f}"
+            else:
+                display_val = f"{val:,.0f}"
+            if val <= good_th:
+                status, scolor = "Good", C.green
+            elif val <= poor_th:
+                status, scolor = "Needs Improvement", C.amber
+            else:
+                status, scolor = "Poor", C.red
+        else:
+            display_val, status, scolor = "—", "N/A", C.muted
+
+        _add_rect(s, x, y, 8.5, 1.5, C.white, line_color=C.border,
+                  shape_type=MSO_SHAPE.ROUNDED_RECTANGLE)
+        _add_rect(s, x, y, 0.08, 1.5, scolor)
+
+        _add_text_box(s, x + 0.3, y + 0.1, 1.5, 0.5, short,
+                      size=22, bold=True, color=C.text_dark, font=FONT_HDR)
+        _add_text_box(s, x + 0.3, y + 0.6, 3.5, 0.3, full,
+                      size=9, color=C.muted)
+
+        _add_text_box(s, x + 4.0, y + 0.1, 2.5, 0.8,
+                      display_val + unit,
+                      size=28, bold=True, color=scolor, font=FONT_HDR,
+                      align=PP_ALIGN.CENTER, anchor=MSO_ANCHOR.MIDDLE)
+
+        _add_rect(s, x + 6.5, y + 0.2, 1.6, 0.4, scolor,
+                  shape_type=MSO_SHAPE.ROUNDED_RECTANGLE)
+        _add_text_box(s, x + 6.5, y + 0.2, 1.6, 0.4, status[:20],
+                      size=10, bold=True, color=C.white,
+                      align=PP_ALIGN.CENTER, anchor=MSO_ANCHOR.MIDDLE)
+
+        _add_text_box(s, x + 0.3, y + 1.0, 8.0, 0.4,
+                      f"目標: ≤{good_th}{unit}  |  改善: {fix[:50]}",
+                      size=9, color=C.muted)
+
+    # ベンチマーク帯
+    _add_rect(s, 0.5, 6.3, 12.3, 0.6, C.deep_blue,
+              shape_type=MSO_SHAPE.ROUNDED_RECTANGLE)
+    _add_text_box(s, 0.7, 6.3, 11.9, 0.6,
+                  "💡 CWVは2021年よりGoogleランキング要因。AIクローラーもページ読込速度を引用優先度に反映。"
+                  "LCP 2.5秒以内 + CLS 0.1以下 + INP 200ms以下が目標。",
+                  size=10, color=C.white, anchor=MSO_ANCHOR.MIDDLE)
+
+    _footer(s, _pg())
+
+    # ==============================================================
+    # 🔍 競合の構造化データ比較
+    # ==============================================================
+    if competitors:
+        s = pres.slides.add_slide(blank)
+        _set_bg(s, C.cream)
+        _header_bar(s, "🔍 競合 構造化データ比較", "Schema.org Implementation")
+
+        # 自サイトのスキーマタイプ収集
+        self_types = set()
+        for sd in structure.get("jsonld", []):
+            t = sd.get("@type", "")
+            if isinstance(t, list):
+                self_types.update(t)
+            else:
+                self_types.add(t)
+
+        # 行ヘッダ
+        schema_rows = ["Organization", "Article", "FAQPage", "BreadcrumbList",
+                       "WebSite", "JobPosting", "Product", "LocalBusiness"]
+        comp_names = ["自サイト"] + [
+            (c.get("title") or c.get("url", ""))[:16] for c in competitors[:3]
+        ]
+        comp_types = [self_types] + [
+            set(c.get("sd_types", [])) for c in competitors[:3]
+        ]
+
+        # ヘッダー
+        _add_rect(s, 0.5, 1.1, 12.3, 0.5, C.navy)
+        _add_text_box(s, 0.7, 1.1, 3.0, 0.5, "スキーマタイプ",
+                      size=11, bold=True, color=C.white, anchor=MSO_ANCHOR.MIDDLE)
+        for ci, name in enumerate(comp_names):
+            x = 3.7 + ci * 2.3
+            _add_text_box(s, x, 1.1, 2.2, 0.5, name[:14],
+                          size=10, bold=True, color=C.cyan if ci == 0 else C.white,
+                          align=PP_ALIGN.CENTER, anchor=MSO_ANCHOR.MIDDLE)
+
+        for ri, stype in enumerate(schema_rows):
+            y = 1.6 + ri * 0.55
+            bg = C.white if ri % 2 == 0 else C.light_bg
+            _add_rect(s, 0.5, y, 12.3, 0.55, bg, line_color=C.border)
+            _add_text_box(s, 0.7, y, 3.0, 0.55, stype,
+                          size=11, bold=True, color=C.text_dark,
+                          anchor=MSO_ANCHOR.MIDDLE)
+            for ci, types in enumerate(comp_types):
+                x = 3.7 + ci * 2.3
+                has_it = stype in types or (stype == "Article" and
+                         ("BlogPosting" in types or "NewsArticle" in types))
+                icon = "○" if has_it else "×"
+                color = C.green if has_it else C.red
+                _add_text_box(s, x, y, 2.2, 0.55, icon,
+                              size=18, bold=True, color=color,
+                              align=PP_ALIGN.CENTER, anchor=MSO_ANCHOR.MIDDLE)
+
+        # 未実装コールアウト
+        comp_all = set()
+        for types in comp_types[1:]:
+            comp_all.update(types)
+        missing = comp_all - self_types
+        if missing:
+            msg = f"⚠️ 競合で実装済みだが自サイトで未実装: {', '.join(list(missing)[:5])}"
+        else:
+            msg = "✅ 競合と同等以上の構造化データ実装レベルです"
+        _add_rect(s, 0.5, 6.2, 12.3, 0.7, C.teal if not missing else C.red,
+                  shape_type=MSO_SHAPE.ROUNDED_RECTANGLE)
+        _add_text_box(s, 0.7, 6.2, 11.9, 0.7, msg,
+                      size=12, bold=True, color=C.white,
+                      anchor=MSO_ANCHOR.MIDDLE)
+
+        _footer(s, _pg())
+
+    # ==============================================================
+    # 📅 改善ロードマップ（ガントチャート風）
+    # ==============================================================
+    s = pres.slides.add_slide(blank)
+    _set_bg(s, C.cream)
+    _header_bar(s, "📅 改善ロードマップ — 90日実施計画", "Implementation Roadmap")
+
+    qw_all = improvements.get("quick_wins", [])
+    strat_all = improvements.get("strategic", [])
+
+    # タイムライン軸
+    _add_rect(s, 1.5, 1.3, 11.0, 0.04, C.border)
+    milestones = [("0日", 1.5), ("30日", 5.2), ("60日", 8.6), ("90日", 12.1)]
+    for label, x in milestones:
+        _add_rect(s, x, 1.2, 0.02, 0.2, C.navy)
+        _add_text_box(s, x - 0.4, 1.0, 0.8, 0.25, label,
+                      size=9, bold=True, color=C.text_dark, align=PP_ALIGN.CENTER)
+
+    phases = [
+        ("Phase 1", "Quick Win — 即効性の高い施策", C.red,
+         qw_all[:3], "+10〜15点", "0-30日"),
+        ("Phase 2", "構造化データ＋E-E-A-T強化", C.amber,
+         (strat_all[:3] if strat_all else qw_all[3:6]), "+10〜15点", "30-60日"),
+        ("Phase 3", "コンテンツ戦略＋継続改善", C.teal,
+         (strat_all[3:6] if len(strat_all) > 3 else qw_all[6:9]), "+5〜10点", "60-90日"),
+    ]
+
+    for pi, (phase_name, phase_desc, color, items, impact, period) in enumerate(phases):
+        y = 1.7 + pi * 1.8
+
+        # フェーズ帯
+        _add_rect(s, 1.5, y, 11.0, 1.5, C.white, line_color=C.border,
+                  shape_type=MSO_SHAPE.ROUNDED_RECTANGLE)
+
+        # 左サイド（フェーズ名）
+        _add_rect(s, 1.5, y, 2.2, 1.5, color,
+                  shape_type=MSO_SHAPE.ROUNDED_RECTANGLE)
+        _add_text_box(s, 1.5, y + 0.15, 2.2, 0.4, phase_name,
+                      size=14, bold=True, color=C.white, font=FONT_HDR,
+                      align=PP_ALIGN.CENTER)
+        _add_text_box(s, 1.5, y + 0.55, 2.2, 0.3, period,
+                      size=9, color=C.white, align=PP_ALIGN.CENTER)
+        _add_text_box(s, 1.5, y + 0.9, 2.2, 0.5, impact,
+                      size=16, bold=True, color=C.white, font=FONT_HDR,
+                      align=PP_ALIGN.CENTER, anchor=MSO_ANCHOR.MIDDLE)
+
+        # 右サイド（施策リスト）
+        _add_text_box(s, 3.9, y + 0.1, 8.4, 0.35, phase_desc,
+                      size=11, bold=True, color=C.text_dark)
+        for ii, item in enumerate(items[:3]):
+            title = item.get("title", "")[:55] if isinstance(item, dict) else str(item)[:55]
+            _add_text_box(s, 4.0, y + 0.5 + ii * 0.32, 8.2, 0.32,
+                          f"• {title}",
+                          size=10, color=C.muted, anchor=MSO_ANCHOR.MIDDLE)
+
+    # 合計インパクト
+    _add_rect(s, 0.5, 7.1, 12.3, 0.3, C.deep_blue,
+              shape_type=MSO_SHAPE.ROUNDED_RECTANGLE)
+    _add_text_box(s, 0.7, 7.1, 11.9, 0.3,
+                  "📈 90日間の合計改善見込み: +25〜40点（現状スコアにより変動）",
+                  size=11, bold=True, color=C.white,
+                  anchor=MSO_ANCHOR.MIDDLE)
+
+    _footer(s, _pg())
+
+    # ==============================================================
     # 🎯 サイト全体優先施策（未実装率が高い項目）
     # ==============================================================
     if site_agg and site_agg.get("common_issues"):
