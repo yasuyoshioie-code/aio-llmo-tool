@@ -133,8 +133,9 @@ def generate_pptx_report(
     cv_data: dict = None,
     site_agg: dict = None,
     preset_id: str = "media",
+    site_diagnosis: dict = None,
 ) -> BytesIO:
-    """診断データから網羅的なクライアント提出用スライドを生成（20-25枚想定）。
+    """診断データから網羅的なクライアント提出用スライドを生成（20-35枚想定）。
 
     preset_id: media / recruiting / corporate — カテゴリラベルを切り替え。
     """
@@ -1866,6 +1867,153 @@ def generate_pptx_report(
                   anchor=MSO_ANCHOR.MIDDLE)
 
     _footer(s, _pg())
+
+    # ==============================================================
+    # 🏗️ サイト構造マップ（ページロール型診断 — コーポレート/採用のみ）
+    # ==============================================================
+    if site_diagnosis and preset_id in ("corporate", "recruiting"):
+        completeness = site_diagnosis.get("structure_completeness", {})
+        role_scores = site_diagnosis.get("role_scores", {})
+        schema_map = site_diagnosis.get("schema_map", {})
+        page_recs = site_diagnosis.get("page_recommendations", [])
+
+        # --- スライド: サイト構造完全性 ---
+        s = pres.slides.add_slide(blank)
+        _set_bg(s, C.cream)
+        _header_bar(s, "🏗️ サイト構造診断マップ",
+                    f"完全性: {completeness.get('score', 0)}%")
+
+        _add_text_box(s, 0.5, 1.05, 12.3, 0.4,
+                      "サイトに必要なページが揃っているか・各ページが役割を果たしているかを診断",
+                      size=13, italic=True, color=C.muted)
+
+        # 必須ページ
+        req_found = completeness.get("required_found", [])
+        req_missing = completeness.get("required_missing", [])
+        rec_found = completeness.get("recommended_found", [])
+        rec_missing = completeness.get("recommended_missing", [])
+
+        _add_text_box(s, 0.5, 1.55, 6.3, 0.4, "✅ 必須ページ",
+                      size=14, bold=True, color=C.text_dark, font=FONT_HDR)
+
+        _ROLE_LABELS = {
+            "top": "トップ", "about": "会社概要", "business": "事業内容",
+            "contact": "問合せ", "privacy": "プライバシー",
+            "recruit_top": "採用トップ", "job_listing": "求人詳細",
+            "entry": "エントリー", "culture": "社風/文化",
+            "benefits": "福利厚生", "interview": "社員インタビュー",
+            "faq": "FAQ", "ir": "IR情報", "news": "ニュース",
+            "csr": "CSR/ESG",
+        }
+
+        all_required = req_found + req_missing
+        for i, role in enumerate(all_required):
+            col = i % 3
+            row = i // 3
+            x = 0.5 + col * 2.1
+            y = 2.0 + row * 0.9
+
+            found = role in req_found
+            rs = role_scores.get(role, {})
+            score_val = rs.get("score", 0)
+            grade_val = rs.get("grade", "-")
+
+            bg = C.green if found else C.red
+            _add_rect(s, x, y, 1.95, 0.75, bg,
+                      shape_type=MSO_SHAPE.ROUNDED_RECTANGLE)
+            _add_text_box(s, x, y + 0.05, 1.95, 0.3,
+                          _ROLE_LABELS.get(role, role),
+                          size=11, bold=True, color=C.white,
+                          align=PP_ALIGN.CENTER)
+            if found:
+                _add_text_box(s, x, y + 0.35, 1.95, 0.35,
+                              f"{score_val}点 ({grade_val})",
+                              size=10, color=C.white,
+                              align=PP_ALIGN.CENTER, anchor=MSO_ANCHOR.MIDDLE)
+            else:
+                _add_text_box(s, x, y + 0.35, 1.95, 0.35,
+                              "❌ 未検出",
+                              size=10, bold=True, color=C.white,
+                              align=PP_ALIGN.CENTER, anchor=MSO_ANCHOR.MIDDLE)
+
+        # 推奨ページ
+        _add_text_box(s, 6.8, 1.55, 6.0, 0.4, "📋 推奨ページ",
+                      size=14, bold=True, color=C.text_dark, font=FONT_HDR)
+
+        all_recommended = rec_found + rec_missing
+        for i, role in enumerate(all_recommended[:6]):
+            col = i % 3
+            row = i // 3
+            x = 6.8 + col * 2.1
+            y = 2.0 + row * 0.9
+
+            found = role in rec_found
+            rs = role_scores.get(role, {})
+
+            bg = C.teal if found else C.muted
+            _add_rect(s, x, y, 1.95, 0.75, bg,
+                      shape_type=MSO_SHAPE.ROUNDED_RECTANGLE)
+            _add_text_box(s, x, y + 0.05, 1.95, 0.3,
+                          _ROLE_LABELS.get(role, role),
+                          size=11, bold=True, color=C.white,
+                          align=PP_ALIGN.CENTER)
+            status_txt = f"{rs.get('score', 0)}点" if found else "未検出"
+            _add_text_box(s, x, y + 0.35, 1.95, 0.35, status_txt,
+                          size=10, color=C.white,
+                          align=PP_ALIGN.CENTER, anchor=MSO_ANCHOR.MIDDLE)
+
+        # 構造化データマップ
+        _add_text_box(s, 0.5, 4.2, 12.3, 0.4, "🗂️ 構造化データ 配置マップ",
+                      size=14, bold=True, color=C.text_dark, font=FONT_HDR)
+        _add_rect(s, 0.5, 4.65, 12.3, 0.35, C.navy)
+        for htxt, hx, hw in [("スキーマ", 0.7, 2.5), ("配置すべきページ", 3.2, 2.5),
+                              ("検出先URL", 5.7, 5.0), ("状態", 10.7, 2.0)]:
+            _add_text_box(s, hx, 4.65, hw, 0.35, htxt,
+                          size=10, bold=True, color=C.white,
+                          anchor=MSO_ANCHOR.MIDDLE)
+
+        sm_items = list(schema_map.items())[:5] if schema_map else [
+            ("Organization", {"should_be_on": "about", "found_on": [], "status": "unknown"}),
+            ("WebSite", {"should_be_on": "top", "found_on": [], "status": "unknown"}),
+        ]
+        for i, (stype, sinfo) in enumerate(sm_items):
+            y = 5.0 + i * 0.42
+            bg = C.white if i % 2 == 0 else C.light_bg
+            _add_rect(s, 0.5, y, 12.3, 0.42, bg, line_color=C.border)
+            _add_text_box(s, 0.7, y, 2.5, 0.42, stype,
+                          size=10, bold=True, color=C.text_dark,
+                          anchor=MSO_ANCHOR.MIDDLE)
+            _add_text_box(s, 3.2, y, 2.5, 0.42,
+                          _ROLE_LABELS.get(str(sinfo.get("should_be_on", "")), "—"),
+                          size=10, color=C.muted,
+                          anchor=MSO_ANCHOR.MIDDLE)
+            found_urls = sinfo.get("found_on", [])
+            _add_text_box(s, 5.7, y, 5.0, 0.42,
+                          (found_urls[0][:50] if found_urls else "未検出"),
+                          size=9, color=C.text_dark if found_urls else C.red,
+                          anchor=MSO_ANCHOR.MIDDLE)
+            st_val = sinfo.get("status", "unknown")
+            st_color = C.green if st_val == "ok" else C.red
+            st_label = "✅" if st_val == "ok" else "❌ 要追加"
+            _add_text_box(s, 10.7, y, 2.0, 0.42, st_label,
+                          size=10, bold=True, color=st_color,
+                          align=PP_ALIGN.CENTER, anchor=MSO_ANCHOR.MIDDLE)
+
+        # ページ別改善提案（下部）
+        if page_recs:
+            _add_rect(s, 0.5, 7.1, 12.3, 0.3, C.deep_blue,
+                      shape_type=MSO_SHAPE.ROUNDED_RECTANGLE)
+            top_recs = page_recs[:3]
+            rec_txt = " | ".join(
+                f"[{_ROLE_LABELS.get(r.get('role',''), r.get('role',''))}] {r.get('action', '')[:25]}"
+                for r in top_recs
+            )
+            _add_text_box(s, 0.7, 7.1, 11.9, 0.3,
+                          f"🔥 最優先: {rec_txt}",
+                          size=10, bold=True, color=C.white,
+                          anchor=MSO_ANCHOR.MIDDLE)
+
+        _footer(s, _pg())
 
     # ==============================================================
     # 🎯 サイト全体優先施策（未実装率が高い項目）
