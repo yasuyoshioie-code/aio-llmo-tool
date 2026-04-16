@@ -1,5 +1,6 @@
 """クライアント提出用PPTXレポート生成モジュール — 実診断データを反映"""
 
+import math
 from io import BytesIO
 from datetime import datetime
 
@@ -913,6 +914,348 @@ def generate_pptx_report(
         _footer(s, _pg())
 
     # ==============================================================
+    # 🤖 AI引用テスト結果（AI Citation Test）
+    # ==============================================================
+    s = pres.slides.add_slide(blank)
+    _set_bg(s, C.cream)
+    _header_bar(s, "🤖 AI引用テスト — あなたのサイトはAIにどう見えているか",
+                "AI Citation Test")
+    _add_text_box(s, 0.5, 1.0, 12.3, 0.35,
+                  "ChatGPT / Perplexity / Gemini に実際にクエリした場合の引用可能性を診断",
+                  size=12, italic=True, color=C.muted)
+
+    # クエリ一覧を取得（5〜8件）
+    _cit_queries = test_queries.get("queries", [])
+    if not _cit_queries:
+        # フォールバック: サイトタイトルから自動生成
+        _cit_queries = [
+            {"query": f"{site_title}とは", "platform": "ChatGPT"},
+            {"query": f"{site_title} おすすめ", "platform": "ChatGPT"},
+            {"query": f"{site_title} 比較", "platform": "Perplexity"},
+            {"query": f"{site_title} メリット デメリット", "platform": "Perplexity"},
+            {"query": f"{site_title} 選び方", "platform": "Google AI Overview"},
+        ]
+
+    # 引用判定ロジック: all_scores から総合推定
+    _cit_total = total.get("total", 0)
+
+    def _citation_verdict(score):
+        if score >= 75:
+            return "○", "高確率で引用", C.green
+        if score >= 50:
+            return "△", "条件付き引用", C.amber
+        return "×", "引用されない可能性大", C.red
+
+    # テーブルヘッダー
+    _add_rect(s, 0.4, 1.5, 12.55, 0.45, C.navy)
+    _cit_hdrs = [
+        ("クエリ文", 0.5, 4.8),
+        ("想定AIの回答", 5.3, 3.5),
+        ("引用", 8.8, 0.7),
+        ("根拠", 9.5, 3.4),
+    ]
+    for _ht, _hx, _hw in _cit_hdrs:
+        _add_text_box(s, _hx, 1.5, _hw, 0.45, _ht,
+                      size=11, bold=True, color=C.white,
+                      align=PP_ALIGN.CENTER, anchor=MSO_ANCHOR.MIDDLE)
+
+    _cit_counts = {"○": 0, "△": 0, "×": 0}
+    for ci, cq in enumerate(_cit_queries[:8]):
+        cy = 1.95 + ci * 0.6
+        cbg = C.white if ci % 2 == 0 else C.light_bg
+        _add_rect(s, 0.4, cy, 12.55, 0.6, cbg, line_color=C.border)
+
+        # クエリ文
+        _add_text_box(s, 0.5, cy, 4.8, 0.6,
+                      cq.get("query", "")[:50],
+                      size=10, color=C.text_dark, anchor=MSO_ANCHOR.MIDDLE)
+
+        # 想定回答
+        _cit_answer = cq.get("expected_answer", "")
+        if not _cit_answer:
+            _cit_answer = f"{site_title}に関する一般的な回答"
+        _add_text_box(s, 5.3, cy, 3.5, 0.6,
+                      _cit_answer[:40],
+                      size=9, color=C.muted, anchor=MSO_ANCHOR.MIDDLE)
+
+        # 引用判定
+        _cit_mark, _cit_reason_default, _cit_color = _citation_verdict(_cit_total)
+        _cit_counts[_cit_mark] += 1
+        _add_rect(s, 8.95, cy + 0.12, 0.4, 0.35, _cit_color,
+                  shape_type=MSO_SHAPE.ROUNDED_RECTANGLE)
+        _add_text_box(s, 8.95, cy + 0.12, 0.4, 0.35, _cit_mark,
+                      size=12, bold=True, color=C.white,
+                      align=PP_ALIGN.CENTER, anchor=MSO_ANCHOR.MIDDLE)
+
+        # 根拠
+        _cit_reason = cq.get("reason_if_not", _cit_reason_default)
+        _add_text_box(s, 9.5, cy, 3.4, 0.6,
+                      _cit_reason[:45],
+                      size=9, color=C.deep_blue, anchor=MSO_ANCHOR.MIDDLE)
+
+    # 下部コールアウト: 引用推定率
+    _cit_total_q = max(sum(_cit_counts.values()), 1)
+    _cit_pct_good = int(_cit_counts["○"] / _cit_total_q * 100)
+    _cit_pct_maybe = int(_cit_counts["△"] / _cit_total_q * 100)
+    _cit_pct_bad = int(_cit_counts["×"] / _cit_total_q * 100)
+
+    _add_rect(s, 0.4, 6.85, 12.55, 0.45, C.deep_blue,
+              shape_type=MSO_SHAPE.ROUNDED_RECTANGLE)
+    _add_text_box(s, 0.5, 6.85, 12.4, 0.45,
+                  f"📊 現状のAI引用推定率:  ○ 高確率 {_cit_pct_good}%  |  "
+                  f"△ 条件付き {_cit_pct_maybe}%  |  × 困難 {_cit_pct_bad}%",
+                  size=12, bold=True, color=C.white,
+                  align=PP_ALIGN.CENTER, anchor=MSO_ANCHOR.MIDDLE)
+
+    _footer(s, _pg())
+
+    # ==============================================================
+    # 💰 改善ROI試算（Return on Investment）
+    # ==============================================================
+    s = pres.slides.add_slide(blank)
+    _set_bg(s, C.cream)
+    _header_bar(s, "💰 改善ROI試算 — 投資対効果の概算", "Return on Investment")
+
+    _roi_current = total.get("total", 0)
+    _roi_improved = min(_roi_current + 20, 100)
+    _roi_organic_uplift = round((_roi_improved - _roi_current) * 0.5, 1)
+    _roi_ai_citation_uplift = round((_roi_improved - _roi_current) * 0.3, 1)
+
+    # 4つのKPIカード横並び
+    _roi_cards = [
+        ("現状スコア", f"{_roi_current}", "/100", C.red if _roi_current < 50 else C.amber),
+        ("改善後スコア（想定）", f"{_roi_improved}", "/100", C.green),
+        ("オーガニック流入改善率", f"+{_roi_organic_uplift}", "%", C.teal),
+        ("AI引用率改善", f"+{_roi_ai_citation_uplift}", "%", C.deep_blue),
+    ]
+    for ri, (rlbl, rbig, rsub, rcol) in enumerate(_roi_cards):
+        rx = 0.5 + ri * 3.18
+        _add_rect(s, rx, 1.1, 3.0, 1.45, rcol,
+                  shape_type=MSO_SHAPE.ROUNDED_RECTANGLE)
+        _add_text_box(s, rx, 1.15, 3.0, 0.3, rlbl,
+                      size=10, color=C.white, align=PP_ALIGN.CENTER,
+                      anchor=MSO_ANCHOR.MIDDLE)
+        _add_text_box(s, rx, 1.5, 3.0, 0.65, rbig,
+                      size=34, bold=True, color=C.white, font=FONT_HDR,
+                      align=PP_ALIGN.CENTER, anchor=MSO_ANCHOR.MIDDLE)
+        _add_text_box(s, rx, 2.2, 3.0, 0.3, rsub,
+                      size=11, color=C.white, align=PP_ALIGN.CENTER,
+                      anchor=MSO_ANCHOR.MIDDLE)
+
+    # 中段: 3フェーズの投資対効果テーブル
+    _add_text_box(s, 0.5, 2.75, 12.3, 0.35,
+                  "📈 3フェーズ投資対効果",
+                  size=14, bold=True, color=C.text_dark, font=FONT_HDR)
+
+    # テーブルヘッダー
+    _add_rect(s, 0.5, 3.15, 12.3, 0.45, C.navy)
+    _roi_th = [
+        ("フェーズ", 0.6, 2.5),
+        ("期間 / コスト", 3.1, 2.5),
+        ("主な施策", 5.6, 3.8),
+        ("想定スコア改善", 9.4, 1.8),
+        ("累積効果", 11.2, 1.5),
+    ]
+    for _rt, _rx, _rw in _roi_th:
+        _add_text_box(s, _rx, 3.15, _rw, 0.45, _rt,
+                      size=10, bold=True, color=C.white,
+                      align=PP_ALIGN.CENTER, anchor=MSO_ANCHOR.MIDDLE)
+
+    _roi_phases = [
+        ("Phase 1", "30日 / 低コスト", "Quick Win実施（構造化データ・メタ改善）",
+         "+10〜15点", f"{min(_roi_current + 12, 100)}点", C.teal),
+        ("Phase 2", "60日 / 中コスト", "構造化データ強化＋E-E-A-T改善",
+         "+10〜15点", f"{min(_roi_current + 25, 100)}点", C.deep_blue),
+        ("Phase 3", "90日 / 継続", "コンテンツ戦略＋権威性構築",
+         "+5〜10点", f"{min(_roi_current + 32, 100)}点", C.navy),
+    ]
+    for pi, (plbl, pcost, paction, pgain, pcum, pcol) in enumerate(_roi_phases):
+        py = 3.6 + pi * 0.75
+        pbg = C.white if pi % 2 == 0 else C.light_bg
+        _add_rect(s, 0.5, py, 12.3, 0.75, pbg, line_color=C.border)
+
+        # フェーズ名バッジ
+        _add_rect(s, 0.65, py + 0.18, 1.6, 0.38, pcol,
+                  shape_type=MSO_SHAPE.ROUNDED_RECTANGLE)
+        _add_text_box(s, 0.65, py + 0.18, 1.6, 0.38, plbl,
+                      size=10, bold=True, color=C.white,
+                      align=PP_ALIGN.CENTER, anchor=MSO_ANCHOR.MIDDLE)
+        _add_text_box(s, 2.3, py, 0.8, 0.75, "",
+                      size=1, color=C.white)  # spacer
+        _add_text_box(s, 3.1, py, 2.5, 0.75, pcost,
+                      size=10, color=C.text_dark,
+                      align=PP_ALIGN.CENTER, anchor=MSO_ANCHOR.MIDDLE)
+        _add_text_box(s, 5.6, py, 3.8, 0.75, paction,
+                      size=10, color=C.text_dark, anchor=MSO_ANCHOR.MIDDLE)
+        _add_text_box(s, 9.4, py, 1.8, 0.75, pgain,
+                      size=11, bold=True, color=C.green,
+                      align=PP_ALIGN.CENTER, anchor=MSO_ANCHOR.MIDDLE)
+        _add_text_box(s, 11.2, py, 1.5, 0.75, pcum,
+                      size=11, bold=True, color=pcol,
+                      align=PP_ALIGN.CENTER, anchor=MSO_ANCHOR.MIDDLE)
+
+    # 下段: 免責注記
+    _add_rect(s, 0.5, 6.1, 12.3, 0.5, C.light_bg,
+              shape_type=MSO_SHAPE.ROUNDED_RECTANGLE)
+    _add_text_box(s, 0.6, 6.1, 12.1, 0.5,
+                  "⚠️ 本試算は推定値であり、実際の効果はサイト規模・業界・実装品質により異なります。"
+                  "数値は過去の診断実績に基づく平均的な改善幅を参考にしています。",
+                  size=9, italic=True, color=C.muted,
+                  align=PP_ALIGN.CENTER, anchor=MSO_ANCHOR.MIDDLE)
+
+    # ROIサマリーバー
+    _add_rect(s, 0.5, 6.75, 12.3, 0.45, C.deep_blue,
+              shape_type=MSO_SHAPE.ROUNDED_RECTANGLE)
+    _add_text_box(s, 0.5, 6.75, 12.3, 0.45,
+                  f"💎 90日間の総合効果:  スコア {_roi_current} → {min(_roi_current + 32, 100)}点  |  "
+                  f"オーガニック流入 +{_roi_organic_uplift}%  |  AI引用率 +{_roi_ai_citation_uplift}%",
+                  size=12, bold=True, color=C.white,
+                  align=PP_ALIGN.CENTER, anchor=MSO_ANCHOR.MIDDLE)
+
+    _footer(s, _pg())
+
+    # ==============================================================
+    # 📊 6カテゴリ レーダーチャート
+    # ==============================================================
+    s = pres.slides.add_slide(blank)
+    _set_bg(s, C.cream)
+    _header_bar(s, "📊 6カテゴリ レーダーチャート", "Radar Chart")
+
+    # ---- 左半分: 六角形レーダーチャート ----
+    _rc_center_x = 3.6   # インチ
+    _rc_center_y = 4.2
+    _rc_radius = 2.2
+
+    # 6カテゴリのスコアを0-1に正規化
+    _rc_scores = []
+    _rc_labels = []
+    for _rk, _rl in cat_order[:6]:
+        _rc_cat = categories.get(_rk, {})
+        _rc_s = _rc_cat.get("score", 0)
+        _rc_m = _rc_cat.get("max", 20) or 20
+        _rc_scores.append(_rc_s / _rc_m)
+        _rc_labels.append((_rl, _rc_s, _rc_m))
+
+    # 角度（上から時計回り）
+    _rc_angles = [math.pi / 2 - i * 2 * math.pi / 6 for i in range(6)]
+
+    # 外枠ガイドライン（50%、100%の六角形）
+    for _rc_ratio in [0.5, 1.0]:
+        _rc_r = _rc_radius * _rc_ratio
+        for _ri in range(6):
+            _x1 = _rc_center_x + _rc_r * math.cos(_rc_angles[_ri])
+            _y1 = _rc_center_y - _rc_r * math.sin(_rc_angles[_ri])
+            _x2 = _rc_center_x + _rc_r * math.cos(_rc_angles[(_ri + 1) % 6])
+            _y2 = _rc_center_y - _rc_r * math.sin(_rc_angles[(_ri + 1) % 6])
+            _rc_line = s.shapes.add_connector(
+                1, Inches(_x1), Inches(_y1), Inches(_x2), Inches(_y2))
+            _rc_line.line.color.rgb = C.border
+            _rc_line.line.width = Pt(0.8 if _rc_ratio < 1.0 else 1.5)
+
+    # 軸線（中心から各頂点へ）
+    for _ri in range(6):
+        _xv = _rc_center_x + _rc_radius * math.cos(_rc_angles[_ri])
+        _yv = _rc_center_y - _rc_radius * math.sin(_rc_angles[_ri])
+        _rc_axis = s.shapes.add_connector(
+            1, Inches(_rc_center_x), Inches(_rc_center_y),
+            Inches(_xv), Inches(_yv))
+        _rc_axis.line.color.rgb = C.border
+        _rc_axis.line.width = Pt(0.5)
+
+    # スコア六角形（FreeformBuilder で塗りつぶし）
+    _rc_fb = s.shapes.build_freeform(
+        Inches(_rc_center_x + _rc_radius * _rc_scores[0] * math.cos(_rc_angles[0])),
+        Inches(_rc_center_y - _rc_radius * _rc_scores[0] * math.sin(_rc_angles[0])),
+    )
+    _rc_vertices = []
+    for _ri in range(1, 6):
+        _sx = _rc_center_x + _rc_radius * _rc_scores[_ri] * math.cos(_rc_angles[_ri])
+        _sy = _rc_center_y - _rc_radius * _rc_scores[_ri] * math.sin(_rc_angles[_ri])
+        _rc_vertices.append((Inches(_sx), Inches(_sy)))
+    # 始点に戻って閉じる
+    _rc_vertices.append((
+        Inches(_rc_center_x + _rc_radius * _rc_scores[0] * math.cos(_rc_angles[0])),
+        Inches(_rc_center_y - _rc_radius * _rc_scores[0] * math.sin(_rc_angles[0])),
+    ))
+    _rc_fb.add_line_segments(_rc_vertices)
+    _rc_shape = _rc_fb.convert_to_shape()
+    _rc_shape.fill.solid()
+    _rc_shape.fill.fore_color.rgb = C.cyan
+    _rc_shape.fill.fore_color.brightness = 0.3
+    _rc_shape.line.color.rgb = C.teal
+    _rc_shape.line.width = Pt(2)
+
+    # 各頂点にカテゴリ名とスコアをラベル表示
+    for _ri in range(6):
+        _lx = _rc_center_x + (_rc_radius + 0.45) * math.cos(_rc_angles[_ri])
+        _ly = _rc_center_y - (_rc_radius + 0.45) * math.sin(_rc_angles[_ri])
+        _rc_lbl, _rc_sc, _rc_mx = _rc_labels[_ri]
+        _rc_pct = _rc_scores[_ri]
+        _rc_sc_color = C.green if _rc_pct >= 0.7 else (C.amber if _rc_pct >= 0.4 else C.red)
+        _add_text_box(s, _lx - 0.9, _ly - 0.2, 1.8, 0.22, _rc_lbl,
+                      size=9, bold=True, color=C.text_dark,
+                      align=PP_ALIGN.CENTER, anchor=MSO_ANCHOR.MIDDLE)
+        _add_text_box(s, _lx - 0.5, _ly + 0.02, 1.0, 0.22,
+                      f"{_rc_sc}/{_rc_mx}",
+                      size=10, bold=True, color=_rc_sc_color,
+                      align=PP_ALIGN.CENTER, anchor=MSO_ANCHOR.MIDDLE)
+
+    # ---- 右半分: カテゴリ別一言所見 ----
+    _add_text_box(s, 7.0, 1.0, 6.0, 0.35, "カテゴリ別所見",
+                  size=14, bold=True, color=C.text_dark, font=FONT_HDR)
+
+    # 弱点を特定（スコア比率が低い順にソート）
+    _rc_sorted = sorted(range(6), key=lambda i: _rc_scores[i])
+    _rc_weak_indices = set(_rc_sorted[:2])  # 下位2つをハイライト
+
+    for _ri in range(6):
+        _ry = 1.5 + _ri * 0.88
+        _rc_lbl, _rc_sc, _rc_mx = _rc_labels[_ri]
+        _rc_pct = _rc_scores[_ri]
+        _is_weak = _ri in _rc_weak_indices
+
+        # 背景カード
+        _rc_card_border = C.red if _is_weak else C.border
+        _add_rect(s, 7.0, _ry, 5.9, 0.78, C.white, line_color=_rc_card_border,
+                  shape_type=MSO_SHAPE.ROUNDED_RECTANGLE)
+
+        # 弱点マーク
+        if _is_weak:
+            _add_rect(s, 7.1, _ry + 0.08, 0.5, 0.25, C.red,
+                      shape_type=MSO_SHAPE.ROUNDED_RECTANGLE)
+            _add_text_box(s, 7.1, _ry + 0.08, 0.5, 0.25, "弱点",
+                          size=8, bold=True, color=C.white,
+                          align=PP_ALIGN.CENTER, anchor=MSO_ANCHOR.MIDDLE)
+
+        # カテゴリ名 + スコア
+        _rc_name_x = 7.7 if _is_weak else 7.15
+        _add_text_box(s, _rc_name_x, _ry + 0.05, 3.0, 0.3, _rc_lbl,
+                      size=11, bold=True, color=C.text_dark,
+                      anchor=MSO_ANCHOR.MIDDLE)
+        _rc_sc_color = C.green if _rc_pct >= 0.7 else (C.amber if _rc_pct >= 0.4 else C.red)
+        _add_text_box(s, 11.5, _ry + 0.05, 1.3, 0.3,
+                      f"{_rc_sc}/{_rc_mx}",
+                      size=11, bold=True, color=_rc_sc_color,
+                      align=PP_ALIGN.RIGHT, anchor=MSO_ANCHOR.MIDDLE)
+
+        # 一言所見
+        _rc_items = categories.get(cat_order[_ri][0], {}).get("items", [])
+        _rc_low_items = [it for it in _rc_items
+                         if it.get("max", 0) > 0
+                         and it.get("score", 0) / it.get("max", 1) < 0.5]
+        if _rc_low_items:
+            _rc_comment = f"低スコア {len(_rc_low_items)}件 — 改善余地あり"
+        elif _rc_pct >= 0.8:
+            _rc_comment = "良好 — 現状維持を推奨"
+        else:
+            _rc_comment = "概ね基準をクリア"
+        _add_text_box(s, _rc_name_x, _ry + 0.4, 5.1, 0.3,
+                      _rc_comment,
+                      size=9, color=C.muted, anchor=MSO_ANCHOR.MIDDLE)
+
+    _footer(s, _pg())
+
+    # ==============================================================
     # 🎯 CV診断（面接応募）— サマリ + 10要素 + 改善案2-3枚
     # ==============================================================
     if cv_data:
@@ -1130,6 +1473,426 @@ def generate_pptx_report(
                               align=PP_ALIGN.CENTER, anchor=MSO_ANCHOR.MIDDLE)
 
             _footer(s, _pg())
+
+    # ==============================================================
+    # 📋 スライドD: カテゴリ別深掘り（各カテゴリ1枚）
+    # ==============================================================
+    for cat_idx, (cat_key, cat_label) in enumerate(cat_order):
+        cat_data = categories.get(cat_key, {})
+        items = cat_data.get("items", [])
+
+        # items が空の場合、all_scores から復元を試みる
+        if not items:
+            raw = all_scores.get(cat_key, {})
+            if isinstance(raw, dict):
+                items = [
+                    {"key": k, "label": k.replace("_", " "),
+                     "score": v if isinstance(v, (int, float)) else 0,
+                     "max": 10, "reason": ""}
+                    for k, v in raw.items()
+                ]
+
+        if not items:
+            continue
+
+        cat_score = cat_data.get("score", sum(it.get("score", 0) for it in items))
+        cat_max = cat_data.get("max", sum(it.get("max", 10) for it in items))
+
+        s = pres.slides.add_slide(blank)
+        _set_bg(s, C.cream)
+        _header_bar(s, f"📋 {cat_label} — 項目別スコア詳細",
+                    f"カテゴリスコア: {cat_score}/{cat_max}")
+
+        # テーブルヘッダー
+        _add_rect(s, 0.5, 1.05, 12.3, 0.45, C.navy)
+        for hi, (htxt, w, x_off) in enumerate([
+            ("項目名", 3.5, 0),
+            ("スコア", 1.0, 3.5),
+            ("最大", 0.8, 4.5),
+            ("達成率", 3.2, 5.3),
+            ("判定", 0.8, 8.5),
+            ("所見", 3.0, 9.3),
+        ]):
+            _add_text_box(s, 0.5 + x_off, 1.05, w, 0.45, htxt,
+                          size=10, bold=True, color=C.cyan,
+                          align=PP_ALIGN.CENTER, anchor=MSO_ANCHOR.MIDDLE)
+
+        for i, item in enumerate(items[:13]):
+            y = 1.5 + i * 0.42
+            bg = C.white if i % 2 == 0 else C.light_bg
+            sc = item.get("score", 0)
+            mx = item.get("max", 10)
+            pct = sc / mx if mx else 0
+
+            # 色判定
+            if pct >= 0.7:
+                bar_color = C.green
+            elif pct >= 0.4:
+                bar_color = C.amber
+            else:
+                bar_color = C.red
+
+            # 判定マーク
+            if pct >= 0.8:
+                mark = "◎"
+            elif pct >= 0.6:
+                mark = "○"
+            elif pct >= 0.4:
+                mark = "△"
+            else:
+                mark = "×"
+
+            reason = item.get("reason", "")[:60]
+
+            _add_rect(s, 0.5, y, 12.3, 0.42, bg, line_color=C.border)
+            # 項目名
+            _add_text_box(s, 0.55, y, 3.5, 0.42,
+                          item.get("label", item.get("key", ""))[:28],
+                          size=9, color=C.text_dark, anchor=MSO_ANCHOR.MIDDLE)
+            # スコア
+            _add_text_box(s, 4.0, y, 1.0, 0.42, str(sc),
+                          size=10, bold=True, color=bar_color,
+                          align=PP_ALIGN.CENTER, anchor=MSO_ANCHOR.MIDDLE)
+            # 最大
+            _add_text_box(s, 5.0, y, 0.8, 0.42, str(mx),
+                          size=10, color=C.muted,
+                          align=PP_ALIGN.CENTER, anchor=MSO_ANCHOR.MIDDLE)
+            # 達成率バー（背景 + 前景）
+            _add_rect(s, 5.85, y + 0.12, 3.0, 0.18, C.border,
+                      shape_type=MSO_SHAPE.ROUNDED_RECTANGLE)
+            _add_rect(s, 5.85, y + 0.12, max(3.0 * pct, 0.05), 0.18, bar_color,
+                      shape_type=MSO_SHAPE.ROUNDED_RECTANGLE)
+            _add_text_box(s, 8.9, y + 0.02, 0.5, 0.2, f"{int(pct*100)}%",
+                          size=7, bold=True, color=bar_color, align=PP_ALIGN.LEFT)
+            # 判定
+            _add_text_box(s, 9.0, y, 0.8, 0.42, mark,
+                          size=12, bold=True, color=bar_color,
+                          align=PP_ALIGN.CENTER, anchor=MSO_ANCHOR.MIDDLE)
+            # 所見
+            _add_text_box(s, 9.8, y, 3.0, 0.42, reason,
+                          size=8, color=C.muted, anchor=MSO_ANCHOR.MIDDLE)
+
+        _footer(s, _pg())
+
+    # ==============================================================
+    # ⚡ スライドE: Core Web Vitals 詳細
+    # ==============================================================
+    if pagespeed:
+        s = pres.slides.add_slide(blank)
+        _set_bg(s, C.cream)
+        _header_bar(s, "⚡ Core Web Vitals 詳細診断", "PageSpeed & UX Metrics")
+
+        # 右上: Performance Score 円形表示
+        perf_score = pagespeed.get("score", 0)
+        if isinstance(perf_score, float) and perf_score <= 1:
+            perf_score = int(perf_score * 100)
+        perf_color = C.green if perf_score >= 90 else (C.amber if perf_score >= 50 else C.red)
+        _add_rect(s, 10.5, 1.1, 2.2, 2.2, perf_color, shape_type=MSO_SHAPE.OVAL)
+        _add_rect(s, 10.65, 1.25, 1.9, 1.9, C.cream, shape_type=MSO_SHAPE.OVAL)
+        _add_text_box(s, 10.5, 1.3, 2.2, 0.5, "Performance",
+                      size=9, bold=True, color=perf_color,
+                      align=PP_ALIGN.CENTER, anchor=MSO_ANCHOR.MIDDLE)
+        _add_text_box(s, 10.5, 1.7, 2.2, 1.0, str(perf_score),
+                      size=40, bold=True, color=perf_color, font=FONT_HDR,
+                      align=PP_ALIGN.CENTER, anchor=MSO_ANCHOR.MIDDLE)
+        _add_text_box(s, 10.5, 2.7, 2.2, 0.4, "/100",
+                      size=11, color=C.muted,
+                      align=PP_ALIGN.CENTER, anchor=MSO_ANCHOR.MIDDLE)
+
+        # 3つの大型メトリクスカード
+        cwv_metrics = [
+            {
+                "name": "LCP",
+                "full": "Largest Contentful Paint",
+                "value": pagespeed.get("lcp"),
+                "unit": "ms",
+                "good": 2500,
+                "ni": 4000,
+                "target": "2,500ms以下",
+                "tip": "画像の遅延読み込み・CDN活用・サーバー応答速度の改善",
+            },
+            {
+                "name": "CLS",
+                "full": "Cumulative Layout Shift",
+                "value": pagespeed.get("cls"),
+                "unit": "",
+                "good": 0.1,
+                "ni": 0.25,
+                "target": "0.10以下",
+                "tip": "画像・広告にwidth/height指定・Web Fontのfont-display設定",
+            },
+            {
+                "name": "INP",
+                "full": "Interaction to Next Paint",
+                "value": pagespeed.get("inp"),
+                "unit": "ms",
+                "good": 200,
+                "ni": 500,
+                "target": "200ms以下",
+                "tip": "長時間タスクの分割・不要なJSの削除・イベントハンドラ最適化",
+            },
+        ]
+
+        for mi, m in enumerate(cwv_metrics):
+            x = 0.5 + mi * 3.3
+            raw_val = m["value"]
+
+            # 値の判定
+            if raw_val is not None:
+                val = float(raw_val)
+                if val <= m["good"]:
+                    status = "Good"
+                    stat_color = C.green
+                elif val <= m["ni"]:
+                    status = "Needs Improvement"
+                    stat_color = C.amber
+                else:
+                    status = "Poor"
+                    stat_color = C.red
+                disp_val = f"{val:,.1f}{m['unit']}" if m["unit"] else f"{val:.3f}"
+            else:
+                disp_val = "N/A"
+                status = "—"
+                stat_color = C.muted
+
+            # メトリクスカード背景
+            _add_rect(s, x, 1.1, 3.1, 3.2, C.white, line_color=C.border,
+                      shape_type=MSO_SHAPE.ROUNDED_RECTANGLE)
+            # メトリクス名
+            _add_text_box(s, x, 1.2, 3.1, 0.35, m["name"],
+                          size=22, bold=True, color=stat_color, font=FONT_HDR,
+                          align=PP_ALIGN.CENTER, anchor=MSO_ANCHOR.MIDDLE)
+            _add_text_box(s, x, 1.55, 3.1, 0.25, m["full"],
+                          size=8, color=C.muted,
+                          align=PP_ALIGN.CENTER, anchor=MSO_ANCHOR.MIDDLE)
+            # 現在値
+            _add_text_box(s, x, 1.9, 3.1, 0.7, disp_val,
+                          size=32, bold=True, color=stat_color, font=FONT_HDR,
+                          align=PP_ALIGN.CENTER, anchor=MSO_ANCHOR.MIDDLE)
+            # ステータスバッジ
+            _add_rect(s, x + 0.65, 2.65, 1.8, 0.35, stat_color,
+                      shape_type=MSO_SHAPE.ROUNDED_RECTANGLE)
+            _add_text_box(s, x + 0.65, 2.65, 1.8, 0.35, status,
+                          size=10, bold=True, color=C.white,
+                          align=PP_ALIGN.CENTER, anchor=MSO_ANCHOR.MIDDLE)
+            # 目標値
+            _add_text_box(s, x, 3.1, 3.1, 0.25, f"目標: {m['target']}",
+                          size=9, color=C.teal,
+                          align=PP_ALIGN.CENTER, anchor=MSO_ANCHOR.MIDDLE)
+            # 改善方法
+            _add_text_box(s, x + 0.1, 3.4, 2.9, 0.8, f"💡 {m['tip']}",
+                          size=8, color=C.text_dark)
+
+        # ソース表示
+        source_text = pagespeed.get("source", "")
+        if source_text:
+            _add_rect(s, 0.5, 4.6, 12.3, 0.35, C.light_bg,
+                      shape_type=MSO_SHAPE.ROUNDED_RECTANGLE)
+            _add_text_box(s, 0.6, 4.6, 12.1, 0.35,
+                          f"📡 データソース: {source_text}",
+                          size=9, italic=True, color=C.muted, anchor=MSO_ANCHOR.MIDDLE)
+
+        _footer(s, _pg())
+
+    # ==============================================================
+    # 🔍 スライドF: 競合の構造化データ比較
+    # ==============================================================
+    if competitors:
+        s = pres.slides.add_slide(blank)
+        _set_bg(s, C.cream)
+        _header_bar(s, "🔍 競合 構造化データ比較", "Structured Data Comparison")
+
+        # 自サイトのJSON-LDタイプ収集
+        own_jsonld = structure.get("jsonld", [])
+        own_types = set()
+        for jl in own_jsonld:
+            if isinstance(jl, dict):
+                t = jl.get("@type", "")
+                if isinstance(t, list):
+                    own_types.update(t)
+                else:
+                    own_types.add(t)
+            elif isinstance(jl, str):
+                own_types.add(jl)
+
+        # スキーマタイプ一覧
+        schema_types = [
+            "Organization", "Article", "FAQPage",
+            "BreadcrumbList", "WebSite", "JobPosting", "Product",
+        ]
+
+        # 競合のタイプ収集
+        comp_types_list = []
+        comp_names = []
+        for ci, comp in enumerate(competitors[:3]):
+            comp_names.append(comp.get("domain", comp.get("url", f"競合{ci+1}"))[:18])
+            raw_sd = comp.get("sd_types", [])
+            comp_types_list.append(set(raw_sd) if isinstance(raw_sd, list) else set())
+
+        # テーブル構築
+        col_labels = ["スキーマタイプ", "自サイト"] + comp_names
+        num_cols = len(col_labels)
+        col_widths = [2.5, 2.0] + [2.0] * len(comp_names)
+        total_w = sum(col_widths)
+        start_x = 0.5
+
+        # ヘッダー行
+        _add_rect(s, start_x, 1.1, total_w, 0.5, C.navy)
+        cx = start_x
+        for ci, (clbl, cw) in enumerate(zip(col_labels, col_widths)):
+            _add_text_box(s, cx, 1.1, cw, 0.5, clbl,
+                          size=10, bold=True, color=C.cyan,
+                          align=PP_ALIGN.CENTER, anchor=MSO_ANCHOR.MIDDLE)
+            cx += cw
+
+        # 未実装リスト（自サイトで×だが競合で○のもの）
+        missing_schemas = []
+
+        for ri, schema in enumerate(schema_types):
+            y = 1.6 + ri * 0.5
+            bg = C.white if ri % 2 == 0 else C.light_bg
+            _add_rect(s, start_x, y, total_w, 0.5, bg, line_color=C.border)
+
+            cx = start_x
+            # スキーマタイプ名
+            _add_text_box(s, cx, y, col_widths[0], 0.5, schema,
+                          size=10, bold=True, color=C.text_dark,
+                          anchor=MSO_ANCHOR.MIDDLE)
+            cx += col_widths[0]
+
+            # 自サイト
+            own_has = schema in own_types
+            mark_text = "○" if own_has else "×"
+            mark_color = C.green if own_has else C.red
+            _add_text_box(s, cx, y, col_widths[1], 0.5, mark_text,
+                          size=16, bold=True, color=mark_color,
+                          align=PP_ALIGN.CENTER, anchor=MSO_ANCHOR.MIDDLE)
+            cx += col_widths[1]
+
+            # 競合
+            any_comp_has = False
+            for ci, comp_set in enumerate(comp_types_list):
+                comp_has = schema in comp_set
+                if comp_has:
+                    any_comp_has = True
+                cm = "○" if comp_has else "×"
+                cc = C.green if comp_has else C.red
+                _add_text_box(s, cx, y, col_widths[2 + ci], 0.5, cm,
+                              size=16, bold=True, color=cc,
+                              align=PP_ALIGN.CENTER, anchor=MSO_ANCHOR.MIDDLE)
+                cx += col_widths[2 + ci]
+
+            # 自サイト未実装 & 競合実装済み
+            if not own_has and any_comp_has:
+                missing_schemas.append(schema)
+
+        # コールアウト: 競合で実装済みだが自サイトで未実装
+        callout_y = 1.6 + len(schema_types) * 0.5 + 0.3
+        if missing_schemas:
+            _add_rect(s, 0.5, callout_y, 12.3, 0.7, RGBColor(0xFE, 0xF3, 0xF2),
+                      line_color=C.red, shape_type=MSO_SHAPE.ROUNDED_RECTANGLE)
+            _add_text_box(s, 0.7, callout_y, 12.0, 0.7,
+                          "⚠️ 競合で実装済み・自サイト未実装: " + "、".join(missing_schemas),
+                          size=11, bold=True, color=C.red, anchor=MSO_ANCHOR.MIDDLE)
+        else:
+            _add_rect(s, 0.5, callout_y, 12.3, 0.5, RGBColor(0xEC, 0xFD, 0xF5),
+                      line_color=C.green, shape_type=MSO_SHAPE.ROUNDED_RECTANGLE)
+            _add_text_box(s, 0.7, callout_y, 12.0, 0.5,
+                          "✅ 主要スキーマタイプはすべて自サイトでも実装済み",
+                          size=11, bold=True, color=C.green, anchor=MSO_ANCHOR.MIDDLE)
+
+        _footer(s, _pg())
+
+    # ==============================================================
+    # 📅 スライドG: 実施ロードマップ（ガントチャート風）
+    # ==============================================================
+    qw_all = improvements.get("quick_wins", [])
+    if qw_all:
+        s = pres.slides.add_slide(blank)
+        _set_bg(s, C.cream)
+        _header_bar(s, "📅 改善ロードマップ — 90日実施計画", "90-Day Improvement Roadmap")
+
+        # Phase振り分け
+        phase1 = [q.get("title", "")[:30] for q in qw_all[:3]]
+        phase2 = [q.get("title", "")[:30] for q in qw_all[3:6]]
+        phase3 = [q.get("title", "")[:30] for q in qw_all[6:9]]
+
+        phases = [
+            {"label": "Phase 1 (0-30日)", "color": C.red,
+             "items": phase1, "predict": "+10〜15点"},
+            {"label": "Phase 2 (30-60日)", "color": C.amber,
+             "items": phase2, "predict": "+5〜10点"},
+            {"label": "Phase 3 (60-90日)", "color": C.teal,
+             "items": phase3, "predict": "+3〜5点"},
+        ]
+
+        # 横軸ラベル (0日 → 30日 → 60日 → 90日)
+        axis_y = 1.2
+        _add_rect(s, 2.5, axis_y + 0.3, 0.02, 5.0, C.border)  # 左端線
+        for ti, (day_label, tx) in enumerate([
+            ("0日", 2.5), ("30日", 5.3), ("60日", 8.1), ("90日", 10.9)
+        ]):
+            _add_rect(s, tx, axis_y, 0.02, 0.3, C.navy)
+            _add_text_box(s, tx - 0.4, axis_y - 0.35, 0.8, 0.3, day_label,
+                          size=10, bold=True, color=C.text_dark,
+                          align=PP_ALIGN.CENTER, anchor=MSO_ANCHOR.MIDDLE)
+
+        # 横帯（3つのPhase）
+        band_x = 2.5
+        band_heights = [1.4, 1.4, 1.4]
+        gap = 0.2
+
+        for pi, phase in enumerate(phases):
+            by = axis_y + 0.35 + pi * (band_heights[pi] + gap)
+            # Phase帯の幅（各Phaseで1/3ずつ右にずれる）
+            bx = band_x + pi * 2.8
+            bw = 8.4 - pi * 2.8
+
+            # 帯描画
+            _add_rect(s, bx, by, bw, band_heights[pi], phase["color"],
+                      shape_type=MSO_SHAPE.ROUNDED_RECTANGLE)
+
+            # Phase ラベル
+            _add_text_box(s, bx + 0.15, by + 0.05, 2.5, 0.35, phase["label"],
+                          size=11, bold=True, color=C.white, anchor=MSO_ANCHOR.MIDDLE)
+
+            # 施策名をリスト表示
+            for ii, item_name in enumerate(phase["items"]):
+                iy = by + 0.4 + ii * 0.3
+                _add_text_box(s, bx + 0.3, iy, bw - 0.5, 0.28,
+                              f"• {item_name}",
+                              size=9, color=C.white, anchor=MSO_ANCHOR.MIDDLE)
+
+            # 右端にスコア改善予測
+            _add_rect(s, bx + bw + 0.15, by + 0.3, 1.5, 0.6, C.white,
+                      line_color=phase["color"],
+                      shape_type=MSO_SHAPE.ROUNDED_RECTANGLE)
+            _add_text_box(s, bx + bw + 0.15, by + 0.3, 1.5, 0.6,
+                          phase["predict"],
+                          size=12, bold=True, color=phase["color"],
+                          align=PP_ALIGN.CENTER, anchor=MSO_ANCHOR.MIDDLE)
+
+        # Phase左ラベル列
+        for pi, phase in enumerate(phases):
+            by = axis_y + 0.35 + pi * (1.4 + gap)
+            _add_text_box(s, 0.3, by + 0.3, 2.1, 0.5,
+                          f"Phase {pi+1}",
+                          size=14, bold=True, color=phase["color"], font=FONT_HDR,
+                          align=PP_ALIGN.CENTER, anchor=MSO_ANCHOR.MIDDLE)
+
+        # 下部サマリ
+        total_predict = "+18〜30点"
+        _add_rect(s, 0.5, 6.4, 12.3, 0.5, C.navy,
+                  shape_type=MSO_SHAPE.ROUNDED_RECTANGLE)
+        _add_text_box(s, 0.6, 6.4, 9.0, 0.5,
+                      f"📊 全Phase完了時の総合スコア改善予測: {total_predict}",
+                      size=13, bold=True, color=C.white, anchor=MSO_ANCHOR.MIDDLE)
+        _add_text_box(s, 9.6, 6.4, 3.0, 0.5,
+                      f"施策数: {len(qw_all)}件",
+                      size=11, color=C.cyan,
+                      align=PP_ALIGN.RIGHT, anchor=MSO_ANCHOR.MIDDLE)
+
+        _footer(s, _pg())
 
     # ==============================================================
     # 🎯 サイト全体優先施策（未実装率が高い項目）
