@@ -67,6 +67,7 @@ def fetch_page(url: str, api_key: str, max_retries: int = 2) -> dict:
     }
 
     # === Tier 1: Tavily extract (advanced) ===
+    tavily_content = ""
     for attempt in range(max_retries):
         try:
             client = _tavily_client(api_key)
@@ -74,38 +75,46 @@ def fetch_page(url: str, api_key: str, max_retries: int = 2) -> dict:
             if resp.get("results"):
                 content = resp["results"][0].get("raw_content", "")
                 if content and len(content) > 200:
+                    tavily_content = content
                     result["content"] = content
                     result["source"] = "tavily_extract_advanced"
                     result["attempts"].append("tavily_advanced:OK")
-                    return result
+                    break
             result["attempts"].append(f"tavily_advanced:empty(try{attempt+1})")
         except Exception as e:
             result["attempts"].append(f"tavily_advanced:err({str(e)[:40]})")
             time.sleep(0.5)
 
     # === Tier 2: Tavily extract (basic) ===
-    try:
-        client = _tavily_client(api_key)
-        resp = client.extract(urls=[url], extract_depth="basic")
-        if resp.get("results"):
-            content = resp["results"][0].get("raw_content", "")
-            if content and len(content) > 100:
-                result["content"] = content
-                result["source"] = "tavily_extract_basic"
-                result["attempts"].append("tavily_basic:OK")
-                return result
-        result["attempts"].append("tavily_basic:empty")
-    except Exception as e:
-        result["attempts"].append(f"tavily_basic:err({str(e)[:40]})")
+    if not tavily_content:
+        try:
+            client = _tavily_client(api_key)
+            resp = client.extract(urls=[url], extract_depth="basic")
+            if resp.get("results"):
+                content = resp["results"][0].get("raw_content", "")
+                if content and len(content) > 100:
+                    tavily_content = content
+                    result["content"] = content
+                    result["source"] = "tavily_extract_basic"
+                    result["attempts"].append("tavily_basic:OK")
+            if not tavily_content:
+                result["attempts"].append("tavily_basic:empty")
+        except Exception as e:
+            result["attempts"].append(f"tavily_basic:err({str(e)[:40]})")
 
-    # === Tier 3: httpx (Chrome UA) ===
+    # === 必ず httpx で raw_html を取得（構造化データ・JSON-LD 抽出に必須） ===
     html, status = _httpx_get(url, UA_CHROME, timeout=30)
     if status == 200 and len(html) > 500:
         result["raw_html"] = html
-        result["source"] = "httpx_chrome"
-        result["attempts"].append("httpx_chrome:OK")
+        result["attempts"].append("httpx_chrome:OK(raw_html)")
+        if not tavily_content:
+            result["source"] = "httpx_chrome"
         return result
     result["attempts"].append(f"httpx_chrome:status{status}")
+
+    # Tavily は成功したが httpx が失敗 → Tavily のコンテンツだけで返す
+    if tavily_content:
+        return result
 
     # === Tier 4: httpx (Googlebot UA — bot判定回避) ===
     html, status = _httpx_get(url, UA_GOOGLEBOT, timeout=30)
@@ -138,18 +147,43 @@ def fetch_page(url: str, api_key: str, max_retries: int = 2) -> dict:
     return result
 
 
+def _is_html_content(text: str) -> bool:
+    """テキストがHTMLページ（404等）かどうかを判定。"""
+    lower = text[:500].lower().strip()
+    return lower.startswith("<!doctype") or lower.startswith("<html") or "<head>" in lower
+
+
 def fetch_text_file(base_url: str, path: str, api_key: str) -> dict:
-    """robots.txt / llms.txt 等のテキストファイルを取得。"""
+    """robots.txt / llms.txt 等のテキストファイルを取得。
+    HTMLレスポンス（404ページ等）は自動棄却する。"""
     url = urljoin(base_url.rstrip("/") + "/", path.lstrip("/"))
     result = {"url": url, "content": "", "exists": False, "source": ""}
 
-    # Tavily extract
+    # httpx を最優先（テキストファイルには Tavily extract 不要）
+    for ua, label in [(UA_CHROME, "chrome"), (UA_GOOGLEBOT, "googlebot")]:
+        try:
+            with httpx.Client(timeout=15, follow_redirects=True) as http:
+                resp = http.get(url, headers={"User-Agent": ua})
+                if resp.status_code == 200:
+                    content = resp.text
+                    # HTMLレスポンスはテキストファイルではない → 棄却
+                    if _is_html_content(content):
+                        continue
+                    if len(content) > 10:
+                        result["content"] = content
+                        result["exists"] = True
+                        result["source"] = f"httpx_{label}"
+                        return result
+        except Exception:
+            pass
+
+    # Tavily フォールバック（httpxでブロックされた場合のみ）
     try:
         client = _tavily_client(api_key)
         resp = client.extract(urls=[url])
         if resp.get("results") and resp["results"][0].get("raw_content"):
             content = resp["results"][0]["raw_content"]
-            if len(content) > 10:
+            if len(content) > 10 and not _is_html_content(content):
                 result["content"] = content
                 result["exists"] = True
                 result["source"] = "tavily_extract"
@@ -157,23 +191,7 @@ def fetch_text_file(base_url: str, path: str, api_key: str) -> dict:
     except Exception:
         pass
 
-    # httpx (Chrome)
-    html, status = _httpx_get(url, UA_CHROME, timeout=15)
-    if status == 200 and len(html) > 10:
-        result["content"] = html
-        result["exists"] = True
-        result["source"] = "httpx_chrome"
-        return result
-
-    # httpx (Googlebot)
-    html, status = _httpx_get(url, UA_GOOGLEBOT, timeout=15)
-    if status == 200 and len(html) > 10:
-        result["content"] = html
-        result["exists"] = True
-        result["source"] = "httpx_googlebot"
-        return result
-
-    result["source"] = f"status:{status}"
+    result["source"] = "not_found"
     return result
 
 
@@ -270,13 +288,35 @@ def search_web(query: str, api_key: str, max_results: int = 5) -> list[dict]:
 
 def fetch_sitemap_info(base_url: str) -> dict:
     """sitemap.xmlの基本情報を取得。robots.txtのSitemap:行からも探索。"""
+    import re as _re
     parsed = urlparse(base_url)
-    candidates = [
-        urljoin(base_url.rstrip("/") + "/", "sitemap.xml"),
-        urljoin(base_url.rstrip("/") + "/", "sitemap_index.xml"),
-        urljoin(base_url.rstrip("/") + "/", "sitemap1.xml"),
-        f"{parsed.scheme}://{parsed.netloc}/sitemap.xml",
+    origin = f"{parsed.scheme}://{parsed.netloc}"
+
+    # robots.txt から Sitemap: ディレクティブを取得
+    sitemap_from_robots = []
+    try:
+        robots_text, robots_status = _httpx_get(
+            urljoin(origin + "/", "robots.txt"), UA_CHROME, timeout=10
+        )
+        if robots_status == 200 and robots_text:
+            sitemap_from_robots = _re.findall(
+                r"(?im)^\s*sitemap:\s*(\S+)", robots_text
+            )
+    except Exception:
+        pass
+
+    # 標準候補 + robots.txt 由来 + WordPress系
+    standard = [
+        f"{origin}/sitemap.xml",
+        f"{origin}/sitemap_index.xml",
+        f"{origin}/sitemap1.xml",
+        f"{origin}/wp-sitemap.xml",
+        f"{origin}/sitemap-index.xml",
+        f"{origin}/post-sitemap.xml",
     ]
+    # robots.txt 由来を先頭に（最も信頼性が高い）
+    candidates = list(dict.fromkeys(sitemap_from_robots + standard))
+
     result = {"exists": False, "url_count": 0, "source": "", "url": ""}
 
     for url in candidates:
@@ -290,6 +330,8 @@ def fetch_sitemap_info(base_url: str) -> dict:
             else:
                 result["url_count"] = html.count("<sitemap>")
                 result["source"] = "httpx(index)"
+            if url in sitemap_from_robots:
+                result["source"] += "(robots.txt)"
             return result
 
     result["source"] = "not_found"

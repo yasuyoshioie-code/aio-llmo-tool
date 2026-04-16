@@ -22,7 +22,7 @@ CATEGORY_DEFINITIONS = {
 
 def _find_organization_jsonld(structure: dict) -> dict | None:
     """Organization / Corporation 系JSON-LDを抽出。"""
-    for jsonld in structure.get("jsonld_items", []):
+    for jsonld in structure.get("jsonld", []):
         node = jsonld
         graph = jsonld.get("@graph") if isinstance(jsonld, dict) else None
         if graph and isinstance(graph, list):

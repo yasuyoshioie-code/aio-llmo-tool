@@ -164,9 +164,31 @@ def validate_jsonld(schemas: list[dict]) -> list[dict]:
             "required": ["name"],
             "recommended": ["description", "image", "offers", "review"],
         },
+        "JobPosting": {
+            "required": ["title", "description", "datePosted", "hiringOrganization"],
+            "recommended": ["validThrough", "employmentType", "jobLocation", "baseSalary"],
+        },
+        "WebSite": {
+            "required": ["name", "url"],
+            "recommended": ["potentialAction", "publisher"],
+        },
+        "WebPage": {
+            "required": ["name"],
+            "recommended": ["description", "url", "datePublished"],
+        },
+        "Corporation": {
+            "required": ["name", "url"],
+            "recommended": ["logo", "contactPoint", "sameAs", "address", "founder"],
+        },
+        "NewsArticle": {
+            "required": ["headline", "author", "datePublished"],
+            "recommended": ["dateModified", "image", "publisher"],
+        },
     }
 
     for schema in schemas:
+        if not isinstance(schema, dict):
+            continue
         schema_type = schema.get("@type", "Unknown")
         if isinstance(schema_type, list):
             schema_type = schema_type[0] if schema_type else "Unknown"
@@ -214,12 +236,15 @@ def check_structured_data_coverage(schemas: list[dict]) -> dict:
             found_types.add(t)
 
     return {
-        "Organization": "Organization" in found_types,
-        "Article": "Article" in found_types or "BlogPosting" in found_types,
+        "Organization": "Organization" in found_types or "Corporation" in found_types,
+        "Article": "Article" in found_types or "BlogPosting" in found_types or "NewsArticle" in found_types,
         "FAQPage": "FAQPage" in found_types,
         "BreadcrumbList": "BreadcrumbList" in found_types,
         "LocalBusiness": "LocalBusiness" in found_types,
         "HowTo": "HowTo" in found_types,
         "Product": "Product" in found_types,
+        "JobPosting": "JobPosting" in found_types,
+        "WebSite": "WebSite" in found_types,
+        "WebPage": "WebPage" in found_types,
         "found_types": list(found_types),
     }

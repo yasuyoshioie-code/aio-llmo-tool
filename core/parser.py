@@ -158,14 +158,33 @@ def _get_jsonld(soup: BeautifulSoup) -> list[dict]:
     schemas = []
     for script in soup.find_all("script", type="application/ld+json"):
         try:
-            data = json.loads(script.string)
+            # .string が None の場合があるので .get_text() を使う
+            raw = script.get_text(strip=True)
+            if not raw:
+                continue
+            data = json.loads(raw)
             if isinstance(data, list):
-                schemas.extend(data)
+                for item in data:
+                    _expand_graph(item, schemas)
             else:
-                schemas.append(data)
-        except (json.JSONDecodeError, TypeError):
+                _expand_graph(data, schemas)
+        except (json.JSONDecodeError, TypeError, ValueError):
             pass
     return schemas
+
+
+def _expand_graph(data: dict, schemas: list):
+    """@graph 配列（Yoast/RankMath等）を展開して個別スキーマに分解。"""
+    if not isinstance(data, dict):
+        return
+    graph = data.get("@graph")
+    if isinstance(graph, list):
+        # @graph 内の各スキーマを個別に追加
+        for item in graph:
+            if isinstance(item, dict):
+                schemas.append(item)
+    else:
+        schemas.append(data)
 
 
 def _detect_faq(soup: BeautifulSoup) -> list[dict]:
