@@ -5,6 +5,7 @@
 """
 
 import re
+from core.scorer import grade_from_score
 
 
 # 業界ベンチマーク（採用ページの応募完了率 %）
@@ -237,11 +238,8 @@ def analyze_cv(structure: dict, all_scores: dict, pagespeed: dict, raw_html: str
     improved_total = min(cv_total + uplift_pts, 100)
     improved = round(max(0.5, min(base_rate * (improved_total / 50), 12.0)), 2)
 
-    if cv_total >= 80: grade = "S"
-    elif cv_total >= 65: grade = "A"
-    elif cv_total >= 50: grade = "B"
-    elif cv_total >= 35: grade = "C"
-    else: grade = "D"
+    grade_result = grade_from_score(cv_total)
+    grade = grade_result["grade"]
 
     if estimated >= CV_BENCHMARK["best_practice"]:
         bench_pos = "ベストプラクティス水準"

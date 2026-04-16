@@ -1,5 +1,6 @@
 """スコア計算 + レポート生成モジュール"""
 
+import re
 from datetime import datetime
 
 
@@ -59,6 +60,38 @@ def calculate_technical_scores(structure: dict, robots: dict, llms: dict,
         "method": "HTMLソースJSON-LD実測", "confidence": "高",
     }
 
+    # --- カテゴリ1追加: 見出し構造 + リスト/テーブル ---
+    headings = structure.get("headings", [])
+    h1_count = sum(1 for h in headings if h.get("level") == 1)
+    h2_count = sum(1 for h in headings if h.get("level") == 2)
+    hs_score = 0
+    if h1_count == 1:
+        hs_score += 3
+    if h2_count >= 3:
+        hs_score += 1
+    hs_reason_parts = [f"H1={h1_count}", f"H2={h2_count}"]
+    scores["1-2_heading_structure"] = {
+        "score": min(hs_score, 4), "max": 4,
+        "reason": f"見出し構造: {', '.join(hs_reason_parts)}",
+        "method": "HTMLソース実測", "confidence": "高",
+    }
+
+    lists_count = structure.get("list_count", 0)
+    tables_count = structure.get("table_count", 0)
+    if lists_count >= 3 and tables_count >= 1:
+        lt_score = 3
+    elif lists_count >= 2:
+        lt_score = 2
+    elif tables_count >= 1:
+        lt_score = 1
+    else:
+        lt_score = 0
+    scores["1-4_list_table"] = {
+        "score": lt_score, "max": 3,
+        "reason": f"リスト{lists_count}個 / テーブル{tables_count}個",
+        "method": "HTMLソース実測", "confidence": "高",
+    }
+
     # --- カテゴリ5: 鮮度 (10点) ---
     dates = structure.get("dates", {})
     scores["5-1_update_display"] = {
@@ -71,14 +104,47 @@ def calculate_technical_scores(structure: dict, robots: dict, llms: dict,
         "max": 3, "reason": f"dateModified: {dates.get('modified', '未実装')}",
         "method": "JSON-LD実測", "confidence": "高",
     }
-    # 5-3, 5-4はサンプリングが必要なため推定
+    # 5-3: dateModifiedの鮮度チェック
+    date_modified = dates.get("modified", "")
+    if date_modified:
+        try:
+            mod_date = datetime.strptime(date_modified[:10], "%Y-%m-%d")
+            days_since = (datetime.now() - mod_date).days
+            if days_since <= 365:
+                s53 = 2
+                r53 = f"dateModified {date_modified[:10]}（1年以内）"
+            elif days_since <= 730:
+                s53 = 1
+                r53 = f"dateModified {date_modified[:10]}（2年以内）"
+            else:
+                s53 = 0
+                r53 = f"dateModified {date_modified[:10]}（2年以上前）"
+        except (ValueError, TypeError):
+            s53 = 0
+            r53 = f"dateModified解析失敗: {date_modified}"
+    else:
+        s53 = 0
+        r53 = "dateModified未実装"
     scores["5-3_recent_update"] = {
-        "score": 1, "max": 2, "reason": "サンプリング未実施（推定）",
-        "method": "推定", "confidence": "低",
+        "score": s53, "max": 2, "reason": r53,
+        "method": "JSON-LD実測", "confidence": "高",
     }
+
+    # 5-4: コンテンツ中の年号管理
+    content_text = structure.get("content_text", "") or ""
+    current_year = datetime.now().year
+    if str(current_year) in content_text:
+        s54 = 2
+        r54 = f"現在年({current_year})の記述あり"
+    elif str(current_year - 1) in content_text:
+        s54 = 1
+        r54 = f"前年({current_year - 1})の記述あり"
+    else:
+        s54 = 0
+        r54 = f"現在年・前年の記述なし"
     scores["5-4_year_management"] = {
-        "score": 1, "max": 2, "reason": "サンプリング未実施（推定）",
-        "method": "推定", "confidence": "低",
+        "score": s54, "max": 2, "reason": r54,
+        "method": "テキスト実測", "confidence": "高",
     }
 
     # --- カテゴリ6: テクニカル (10点) ---
@@ -229,28 +295,27 @@ def calculate_category_totals(all_scores: dict) -> dict:
     return categories
 
 
+def grade_from_score(score: int) -> dict:
+    """統一グレード判定関数。全プリセット共通。"""
+    if score >= 85:
+        return {"grade": "S", "label": "最優秀"}
+    elif score >= 70:
+        return {"grade": "A", "label": "優秀"}
+    elif score >= 55:
+        return {"grade": "B", "label": "良好"}
+    elif score >= 40:
+        return {"grade": "C", "label": "改善必要"}
+    else:
+        return {"grade": "D", "label": "要対策"}
+
+
 def calculate_total(categories: dict) -> dict:
     """総合スコアとグレードを計算。"""
     total = sum(c["score"] for c in categories.values())
     total = round(total, 1)
 
-    if total >= 80:
-        grade = "A"
-        label = "AIO/LLMO対応が高水準"
-    elif total >= 60:
-        grade = "B"
-        label = "基本対応あり。重点改善で大幅効果"
-    elif total >= 40:
-        grade = "C"
-        label = "対応不足。優先施策の実行が急務"
-    elif total >= 20:
-        grade = "D"
-        label = "ほぼ未対応。基盤構築から着手"
-    else:
-        grade = "E"
-        label = "全面的な対策が必要"
-
-    return {"total": total, "grade": grade, "label": label}
+    result = grade_from_score(total)
+    return {"total": total, "grade": result["grade"], "label": result["label"]}
 
 
 def generate_report_md(

@@ -14,6 +14,7 @@
 import re
 
 from core.presets.recruiting_cv import analyze_cv  # noqa: F401
+from core.scorer import grade_from_score
 
 
 PRESET_ID = "recruiting"
@@ -681,24 +682,12 @@ def score_page(structure, robots, llms, pagespeed, sitemap):
 
     # 総合
     total_score = sum(c["score"] for c in categories.values())
-    if total_score >= 80: grade = "S"
-    elif total_score >= 65: grade = "A"
-    elif total_score >= 50: grade = "B"
-    elif total_score >= 35: grade = "C"
-    else: grade = "D"
-
-    grade_labels = {
-        "S": "卓越: Google for Jobsでも上位表示される採用力の高いページ",
-        "A": "優良: 基本は押さえ、もう一押しでトップクラス",
-        "B": "標準: 一般的、差別化要素の強化が必要",
-        "C": "要改善: 応募率を大きく落としている可能性",
-        "D": "危険: Google for Jobs未対応・情報不足で応募が集まりにくい",
-    }
+    grade_result = grade_from_score(round(total_score))
 
     total = {
         "total": round(total_score),
-        "grade": grade,
-        "label": grade_labels[grade],
+        "grade": grade_result["grade"],
+        "label": grade_result["label"],
     }
 
     return scores, categories, total

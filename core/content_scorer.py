@@ -1,6 +1,7 @@
 """Python-onlyコンテンツ分析モジュール — Claude API不要で全30項目をヒューリスティクス採点"""
 
 import re
+from datetime import datetime
 
 
 def analyze_content_python(content_text: str, structure: dict) -> dict:
@@ -60,14 +61,11 @@ def analyze_content_python(content_text: str, structure: dict) -> dict:
     ]
     def_count = 0
     for pat in definition_patterns:
-        def_count += len(re.findall(pat, content_text[:5000]))
+        def_count += len(re.findall(pat, content_text[:30000]))
 
-    if 1 <= def_count <= 3:
+    if def_count >= 1:
         df_score = 4
-        df_reason = f"定義文{def_count}件検出（適切）"
-    elif def_count > 3:
-        df_score = 2
-        df_reason = f"定義文{def_count}件（やや冗長）"
+        df_reason = f"定義文{def_count}件検出"
     else:
         df_score = 0
         df_reason = "定義文パターン未検出"
@@ -94,7 +92,7 @@ def analyze_content_python(content_text: str, structure: dict) -> dict:
     ]
     num_total = 0
     for pat in number_patterns:
-        num_total += len(re.findall(pat, content_text[:5000], re.IGNORECASE))
+        num_total += len(re.findall(pat, content_text[:30000], re.IGNORECASE))
 
     # 汎用的な数値も検出
     generic_nums = re.findall(r"\d{2,}", content_text[:3000])
@@ -119,7 +117,7 @@ def analyze_content_python(content_text: str, structure: dict) -> dict:
         "取材", "インタビュー", "アンケート", "調査結果",
         "筆者", "私が", "私は", "実測", "計測",
     ]
-    orig_count = sum(1 for m in original_markers if m in content_text[:5000])
+    orig_count = sum(1 for m in original_markers if m in content_text[:30000])
 
     if orig_count >= 3:
         od_score = 4
@@ -143,7 +141,7 @@ def analyze_content_python(content_text: str, structure: dict) -> dict:
 
     entities = katakana_entities + alpha_entities
     if entities:
-        consistent = sum(1 for e in entities if e in content_text[:5000])
+        consistent = sum(1 for e in entities if e in content_text[:30000])
         ratio = consistent / len(entities) if entities else 0
 
         if ratio >= 0.8:
@@ -205,10 +203,20 @@ def analyze_eeat_python(content_text: str, structure: dict) -> dict:
 
     # --- 3-3: 引用・出典 ---
     # 外部リンク数で近似
-    ext_link_pattern = r'https?://[^\s"<>)]*'
-    ext_links = re.findall(ext_link_pattern, content_text[:10000])
-    # 自サイトリンクを除外するために、全体の半分を外部と仮定
-    est_external = len(ext_links) // 2
+    est_external = structure.get("external_links", 0)
+    if est_external == 0:
+        # structureにexternal_linksがない場合、URLからドメインを抽出して外部リンクを推定
+        canonical = structure.get("canonical", "") or ""
+        if canonical:
+            _canon_domain = canonical.split("//")[-1].split("/")[0].lower() if "//" in canonical else ""
+        else:
+            _canon_domain = ""
+        ext_link_pattern = r'https?://([^\s"<>)/]+)'
+        all_domains = re.findall(ext_link_pattern, content_text[:10000])
+        if _canon_domain:
+            est_external = sum(1 for d in all_domains if d.lower() != _canon_domain)
+        else:
+            est_external = len(all_domains) // 2
 
     if est_external >= 5:
         ci_score = 3
@@ -226,7 +234,7 @@ def analyze_eeat_python(content_text: str, structure: dict) -> dict:
     exp_markers = ["実際に", "体験", "使ってみ", "試してみ", "レビュー",
                    "感想", "正直", "個人的に", "率直に", "実感",
                    "やってみた", "行ってみた", "買ってみた"]
-    exp_count = sum(1 for m in exp_markers if m in content_text[:5000])
+    exp_count = sum(1 for m in exp_markers if m in content_text[:30000])
 
     if exp_count >= 3:
         ex_score = 3
@@ -257,10 +265,23 @@ def analyze_eeat_python(content_text: str, structure: dict) -> dict:
 
     scores["editorial_policy"] = {"score": ed_score, "reason": ed_reason}
 
-    # --- 3-6: 外部一貫性（推定のみ）---
+    # --- 3-6: 外部一貫性（外部リンク数ベース）---
+    ext_link_count = structure.get("external_links", 0)
+    if ext_link_count == 0:
+        # structureに外部リンク数がない場合、content_text中のURL数から推定
+        ext_link_count = len(re.findall(r'https?://', content_text))
+    if ext_link_count >= 5:
+        ec6_score = 3
+        ec6_reason = f"外部リンク{ext_link_count}件（外部参照充実）"
+    elif ext_link_count >= 2:
+        ec6_score = 1.5
+        ec6_reason = f"外部リンク{ext_link_count}件（一部あり）"
+    else:
+        ec6_score = 0
+        ec6_reason = f"外部リンク{ext_link_count}件（不足）"
     scores["external_consistency"] = {
-        "score": 1.5,
-        "reason": "外部プロフィール照合はAPI不使用のため推定",
+        "score": ec6_score,
+        "reason": ec6_reason,
     }
 
     return scores
@@ -292,7 +313,7 @@ def generate_improvements_python(
     jsonld_types = {s.get("@type") for s in jsonld_list if isinstance(s, dict)}
     author = structure.get("author", {})
     dates = structure.get("dates", {})
-    today = "2026-04-15"
+    today = datetime.now().strftime("%Y-%m-%d")
 
     competitors = competitors or []
     comparison = comparison or {}

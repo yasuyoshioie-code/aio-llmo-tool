@@ -1,7 +1,9 @@
 """コーポレートサイト向けプリセット — 企業情報網羅性・信頼性・ステークホルダー対応を評価"""
 
 import re
+from datetime import datetime
 from core.content_scorer import generate_test_queries_python
+from core.scorer import grade_from_score
 
 
 PRESET_ID = "corporate"
@@ -218,8 +220,9 @@ def _score_ir_news(structure: dict, content: str) -> dict:
 
     # 4-2 ニュース・プレスリリースの鮮度 (5点)
     has_news = ("ニュース" in content) or ("お知らせ" in content) or ("News" in content) or ("プレスリリース" in content)
-    # 直近1年以内の年号があるか
-    recent_year = bool(re.search(r"202[4-6]年", content))
+    # 直近1年以内の年号があるか（動的に現在年±1年を検出）
+    current_year = datetime.now().year
+    recent_year = any(f"{y}年" in content for y in range(current_year - 1, current_year + 1))
     if has_news and recent_year: s = 5
     elif has_news: s = 3
     elif recent_year: s = 2
@@ -375,21 +378,8 @@ def score_page(structure, robots, llms, pagespeed, sitemap):
 
     total_score = sum(c["score"] for c in categories.values())
 
-    if total_score >= 85: grade = "S"
-    elif total_score >= 70: grade = "A"
-    elif total_score >= 55: grade = "B"
-    elif total_score >= 40: grade = "C"
-    else: grade = "D"
-
-    grade_labels = {
-        "S": "卓越: 業界トップクラスの企業情報網羅性・信頼性",
-        "A": "優良: ステークホルダーへの情報開示が充実",
-        "B": "標準: 基本情報は揃うが、IR/CSR等の発信が不足",
-        "C": "要改善: 企業情報の網羅性・構造化が不十分",
-        "D": "危険: コーポレートサイトとして必要情報が大幅不足",
-    }
-
-    total = {"total": total_score, "grade": grade, "label": grade_labels[grade]}
+    grade_result = grade_from_score(total_score)
+    total = {"total": total_score, "grade": grade_result["grade"], "label": grade_result["label"]}
     return all_scores, categories, total
 
 
